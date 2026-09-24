@@ -1,0 +1,3 @@
+policy,requested_units,filled_units,unfilled_units,avg_on_hand_sum,orders,simulated_fill_rate
+95pct_normal_buffer,84967,80761,4206,45431.55737704918,50,0.95049842880177
+no_safety_stock,84967,68396,16571,19659.803278688523,44,0.8049713418150576

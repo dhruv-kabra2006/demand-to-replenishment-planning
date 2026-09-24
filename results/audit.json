@@ -1,0 +1,11 @@
+{
+  "raw_rows": 541909,
+  "retained_rows": 461385,
+  "excluded_rows": 80524,
+  "unique_skus": 3709,
+  "train_start": "2011-01-01",
+  "test_start": "2011-10-01",
+  "test_end_exclusive": "2011-12-01",
+  "training_period_skus": 3538,
+  "selected_skus": 20
+}
