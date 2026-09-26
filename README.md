@@ -2,7 +2,7 @@
 
 An applied supply chain planning project using [UCI Online Retail](https://archive.ics.uci.edu/dataset/352/online+retail) transaction records (Chen, 2015; DOI: 10.24432/C5BW33). The dataset is licensed CC BY 4.0. It records sales transactions, **not** the retailer's stock levels, unmet demand, supplier lead times, or purchase costs. All replenishment results below are illustrative simulations and were not implemented at the retailer.
 
-Open the [guided notebook](Inventory_Project.ipynb) to inspect the analysis step by step. The analysis uses Python, Pandas, and NumPy; the results include Excel-compatible CSV tables and a workbook snapshot.
+Open the [analysis notebook](Inventory_Project.ipynb) to inspect the analysis step by step. The analysis uses Python, Pandas, and NumPy; the results include Excel-compatible CSV tables and a workbook snapshot.
 
 ## Business question
 
