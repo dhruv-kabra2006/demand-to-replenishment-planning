@@ -1,8 +1,8 @@
-# Retail inventory planning: demand forecasts and reorder policies
+# Demand-to-Replenishment Planning Engine
 
-An applied supply chain analytics portfolio project using [UCI Online Retail](https://archive.ics.uci.edu/dataset/352/online+retail) transaction records (Chen, 2015; DOI: 10.24432/C5BW33). The dataset is licensed CC BY 4.0. It records sales transactions, **not** the retailer's stock levels, unmet demand, supplier lead times, or purchase costs. All replenishment results below are illustrative simulations and were not implemented at the retailer.
+An applied supply chain planning project using [UCI Online Retail](https://archive.ics.uci.edu/dataset/352/online+retail) transaction records (Chen, 2015; DOI: 10.24432/C5BW33). The dataset is licensed CC BY 4.0. It records sales transactions, **not** the retailer's stock levels, unmet demand, supplier lead times, or purchase costs. All replenishment results below are illustrative simulations and were not implemented at the retailer.
 
-Start with the [guided notebook](Inventory_Project.ipynb) and [2–3 day learning guide](docs/learning_guide.md). The analysis uses Python, Pandas, and NumPy; the results include Excel-compatible CSV tables and a workbook snapshot.
+Open the [guided notebook](Inventory_Project.ipynb) to inspect the analysis step by step. The analysis uses Python, Pandas, and NumPy; the results include Excel-compatible CSV tables and a workbook snapshot.
 
 ## Business question
 
@@ -23,6 +23,16 @@ The four-week weekday mean had the lowest holdout WAPE among these four prespeci
 
 ![Forecast comparison](results/forecast_comparison.png)
 
+## Rolling backtest and demand classification
+
+The deeper model adds four rolling-origin validation windows before the final Oct–Nov holdout. For each origin, each method is re-evaluated one day at a time over the following 28 days. The best method is selected separately for each SKU using earlier data only. Croston SBA is included for intermittent demand, but it performs poorly on this high-volume selection. The four-week weekday mean has the lowest pooled rolling-origin WAPE in this run.
+
+![Rolling backtest](results/rolling_backtest_comparison.png)
+
+The project also calculates average demand interval (ADI) and squared coefficient of variation (CV²) to classify each selected SKU as smooth, intermittent, erratic, or lumpy. This gives the planner a reason to use different forecasting methods for different item behaviors.
+
+![Demand profile mix](results/demand_profile_mix.png)
+
 | Hypothetical reorder policy | Simulated units filled / requested | Simulated fill rate | Sum of average ending on-hand units across 20 SKUs |
 |---|---:|---:|---:|
 | Reorder point with no buffer | 68,396 / 84,967 | 80.50% | 19,660 |
@@ -40,6 +50,20 @@ The buffer produced 12,365 more simulated filled units under the seven-day scena
 
 ![Lead-time sensitivity](results/lead_time_sensitivity.png)
 
+## Empirical policy selection and cost trade-off
+
+For each selected SKU, the expanded model bootstraps daily demand to create an empirical lead-time-demand distribution. It tests candidate reorder points at the 50th, 75th, 90th, 95th, and 98th percentiles on an earlier August validation month. It selects the candidate with the lowest assumed relevant cost, then evaluates that fixed policy on October–November.
+
+Relevant cost is a transparent scenario measure:
+
+`holding cost + order cost + shortage penalty`
+
+The analysis assumes a £20 order cost, purchase cost equal to 60% of the median selling price, 25% annual holding rate, and shortage penalty equal to twice estimated purchase cost. These are planning assumptions because the public dataset contains no purchasing or inventory cost data. The selected policy is therefore a model exercise, not a recommendation to the original retailer.
+
+![Optimized policy trade-off](results/optimized_policy_tradeoff.png)
+
+The SQL layer in [`sql/`](sql/) loads the exported demand and policy tables into SQLite and contains queries for monthly demand, service/cost ranking, and forecast-method mix. The CSV outputs can also be connected to Power BI for an operations dashboard.
+
 ## Reproduce locally or in Google Colab
 
 1. Run `python download_data.py`, or download `Online Retail.xlsx` from the [UCI dataset page](https://archive.ics.uci.edu/dataset/352/online+retail) and place it at `data/Online Retail.xlsx`. The raw dataset is excluded from Git because it is large and available from the source.
@@ -47,7 +71,7 @@ The buffer produced 12,365 more simulated filled units under the seven-day scena
 3. Run: `python analysis.py` from the repository root. For another location use `python analysis.py --input /path/to/file.xlsx`.
 4. Open `Inventory_Project.ipynb` for the guided analysis and plots; in Colab upload `analysis.py`, `report.py`, and the `.xlsx` to the runtime, and adjust the input path in the first code cell.
 5. Run `python report.py` to refresh the charts. Inspect the tables in `results/`. The included [Excel workbook](results/inventory_recommendations.xlsx) is a snapshot of this run; import regenerated CSVs into Excel after changing the model. Python does not automatically refresh that workbook.
-6. Run `python -m unittest test_logic.py` for the five focused checks covering cleaning, forecast leakage, inventory balance, warm-up accounting, and invalid order quantities.
+6. Run `python -m unittest test_logic.py` for the seven focused checks covering cleaning, forecast leakage, inventory balance, warm-up accounting, invalid order quantities, intermittent demand, and demand-profile counting.
 
 No credentials or paid software are required. Python may take a minute to read the original spreadsheet.
 
@@ -61,9 +85,11 @@ No credentials or paid software are required. Python may take a minute to read t
 6. For each assumed lead time `L` in 3, 7, and 14 days, baseline reorder point is `ceil(mean daily sales × L)`. Buffered point adds `ceil(1.645 × daily standard deviation × sqrt(L))`, relying on independent daily demand and a normal approximation. The daily review approximation is another limitation.
 7. Use illustrative EOQ quantities computed from annualized Jan–Aug mean sales, a hypothetical £20/order, estimated purchase price of 60% of the median Jan–Aug selling price, and annual holding cost of 25% of that estimated purchase price. These figures are **assumptions, not retailer data**.
 8. For each SKU/lead-time pair, start both policies on September 1 with `baseline reorder point + EOQ` on hand and no pipeline orders. Receive orders at the start of the promised day, lose sales if stock is insufficient, and reorder at day end whenever inventory position reaches the point. Carry stock and pipeline orders through the warm-up; report only Oct–Nov metrics. Test-period observed sales are treated as a demand proxy; actual stockouts and lost demand cannot be measured.
+9. For advanced model selection, use May–August origins and 28-day windows for rolling backtesting. Select methods per SKU, not globally, and evaluate the selected method on Oct–Nov only after selection. For policy optimization, use August validation and keep October–November untouched until final evaluation.
 
 ## Recommended next improvements
 
 - Investigate extreme sales spikes and evaluate weekly aggregate forecasts or intermittent-demand methods with an earlier validation period for model selection.
 - Obtain actual supplier lead times, on-hand inventory, backorders, and purchase prices before estimating business savings.
 - Estimate lead-time forecast errors and compare an empirical buffer with the normal approximation. Connect the forecast and inventory modules only after validating the appropriate horizon.
+- Add supplier calendars, order minimums, case-pack constraints, and warehouse capacity once real operational data is available.
