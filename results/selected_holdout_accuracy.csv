@@ -1,0 +1,2 @@
+method,test_sku_days,actual_units,mae_units_per_sku_day,wape
+per_sku_selected_from_rolling_backtest,1220,84967,65.58563710561609,0.9417123973878285

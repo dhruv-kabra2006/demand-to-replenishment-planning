@@ -1,95 +1,90 @@
 # Demand-to-Replenishment Planning Engine
 
-An applied supply chain planning project using [UCI Online Retail](https://archive.ics.uci.edu/dataset/352/online+retail) transaction records (Chen, 2015; DOI: 10.24432/C5BW33). The dataset is licensed CC BY 4.0. It records sales transactions, **not** the retailer's stock levels, unmet demand, supplier lead times, or purchase costs. All replenishment results below are illustrative simulations and were not implemented at the retailer.
+An applied demand-planning project using the [UCI Online Retail dataset](https://archive.ics.uci.edu/dataset/352/online+retail) (Chen, 2015; DOI: 10.24432/C5BW33; CC BY 4.0). The source contains sales transactions. It does **not** contain unconstrained demand, inventory on hand, stockouts, supplier lead times, purchase costs, or order histories. Inventory outputs are illustrative simulations using stated assumptions; they are not retailer results or verified savings.
 
-Open the [analysis notebook](Inventory_Project.ipynb) to inspect the analysis step by step. The analysis uses Python, Pandas, and NumPy; the results include Excel-compatible CSV tables and a workbook snapshot.
+The project screens merchandise-like SKUs, compares daily forecasts, classifies demand behavior, evaluates reorder-point scenarios, and chooses a candidate reorder point using a historical validation period. The full workflow is in [`analysis.py`](analysis.py); a guided notebook is [`Inventory_Project.ipynb`](Inventory_Project.ipynb).
 
-## Business question
+## Data and scope
 
-For a retailer's high-revenue items, how might an inventory planner use historical sales to select forecasts, order quantities, and reorder points? What changes in a scenario with a statistical safety-stock buffer?
+The reproducible run read 541,909 source rows and retained 461,385 transaction lines dated January–November 2011 after filtering to positive quantity and price, non-cancelled invoices, and stock codes matching five digits plus up to two letters. It found 3,709 eligible SKUs across the full window; 3,538 had January–September sales and were eligible for ranking. The 20 SKUs with the highest January–September selling revenue were selected before the October–November holdout. ABC labels are based on cumulative selling revenue, not inventory value or profit.
 
-## Results from the provided data
+Missing SKU-days are set to zero **recorded sales**. These zeros do not prove that stock was available or demand was absent. Returns and cancellations are excluded rather than treated as negative demand.
 
-The script read 541,909 original transaction lines and retained 461,385 after limiting the analysis to Jan–Nov 2011, merchandise-like SKU codes, positive quantities and prices, and non-cancelled invoices. It identified 3,709 distinct eligible SKUs across the full analysis window; 3,538 had sales in the Jan–Sep training period and entered the ABC segmentation. SKUs were ranked by **training-period selling revenue**; the top 20 were evaluated on Oct–Nov 2011 (61 days, 1,220 SKU-days).
+## Forecast evaluation
 
-| Forecast method, using past daily units | MAE, units per SKU-day | WAPE |
+All forecasts predict one day ahead and use information available before that day. The final holdout is October 1–November 30, 2011 (61 days; 1,220 SKU-days). WAPE is pooled absolute error divided by pooled observed units.
+
+| Method | Holdout MAE (units/SKU-day) | Holdout WAPE |
 |---|---:|---:|
-| Prior 7-day moving average | 68.40 | 98.21% |
-| Prior 28-day moving average | 63.15 | 90.67% |
-| Same weekday last week | 71.95 | 103.31% |
-| Mean of the prior four matching weekdays | 62.18 | 89.29% |
+| 7-day moving average | 68.40 | 98.21% |
+| 28-day moving average | 63.15 | 90.67% |
+| Same weekday, previous week | 71.95 | 103.31% |
+| Four-week weekday mean | 62.18 | 89.29% |
+| Croston SBA (α = 0.10) | 63.59 | 91.30% |
 
-The four-week weekday mean had the lowest holdout WAPE among these four prespecified benchmarks, but **all forecasts had high error** for this volatile, seasonal selection. The holdout comparison is descriptive, not independent evidence for a tuned model. A production planning model would need better forecasting and additional data.
+![Holdout forecast comparison](results/forecast_comparison.png)
 
-![Forecast comparison](results/forecast_comparison.png)
+A separate rolling-origin backtest uses four origins (May 1, June 1, July 1, and August 1), each followed by 28 daily one-step-ahead predictions. Forecasts update with each newly observed validation day. The four-week weekday mean has the lowest pooled rolling WAPE (87.94%); Croston SBA has 200.38% WAPE on this high-volume SKU selection. These are descriptive results from one historical dataset, not a claim that one method is generally superior.
 
-## Rolling backtest and demand classification
+![Rolling-origin comparison](results/rolling_backtest_comparison.png)
 
-The deeper model adds four rolling-origin validation windows before the final Oct–Nov holdout. For each origin, each method is re-evaluated one day at a time over the following 28 days. The best method is selected separately for each SKU using earlier data only. Croston SBA is included for intermittent demand, but it performs poorly on this high-volume selection. The four-week weekday mean has the lowest pooled rolling-origin WAPE in this run.
+The model also selects one forecasting method per SKU by its pooled rolling-validation WAPE. That selection has 94.17% WAPE on the untouched holdout, worse than the 89.29% of the best fixed benchmark. Per-SKU selection is included for transparency and further study; it did not improve this holdout result.
 
-![Rolling backtest](results/rolling_backtest_comparison.png)
+## Demand classification
 
-The project also calculates average demand interval (ADI) and squared coefficient of variation (CV²) to classify each selected SKU as smooth, intermittent, erratic, or lumpy. This gives the planner a reason to use different forecasting methods for different item behaviors.
+Average demand interval (ADI) is the number of training days divided by days with positive recorded sales. CV² is the squared coefficient of variation of positive daily quantities. The standard 1.32 ADI and 0.49 CV² cutoffs define smooth, intermittent, erratic, and lumpy profiles. Profiles use January–September only.
 
-![Demand profile mix](results/demand_profile_mix.png)
+![Training demand profile mix](results/demand_profile_mix.png)
 
-| Hypothetical reorder policy | Simulated units filled / requested | Simulated fill rate | Sum of average ending on-hand units across 20 SKUs |
-|---|---:|---:|---:|
-| Reorder point with no buffer | 68,396 / 84,967 | 80.50% | 19,660 |
-| Reorder point with normal-theory buffer | 80,761 / 84,967 | 95.05% | 45,432 |
+## Inventory scenarios
 
-The buffer produced 12,365 more simulated filled units under the seven-day scenario assumptions, while average inventory was 25,772 units higher. Both policies start with the same stock per SKU and lead-time scenario and run through a 30-day warm-up before measurement. These are **simulated outcomes**, not observed sales gained or verified savings. The label “95%” refers to the normal-theory input quantile, not a guaranteed service level.
+The baseline compares a mean-demand reorder point with the same point plus a 1.645 standard-deviation buffer. Reorder quantities use EOQ with a hypothetical £20 order cost, estimated purchase price at 60% of median selling price, and a 25% annual holding rate. A 7-day assumed lead-time scenario yields:
 
-![Inventory trade-off](results/policy_tradeoff.png)
+| Policy | Requested units (sales proxy) | Filled units | Simulated fill rate | Sum of average ending on-hand units |
+|---|---:|---:|---:|---:|
+| Mean-demand reorder point | 84,967 | 68,396 | 80.50% | 19,660 |
+| Normal-theory buffer | 84,967 | 80,761 | 95.05% | 45,432 |
 
-| Assumed lead time | No buffer: simulated fill rate | Buffer: simulated fill rate |
-|---|---:|---:|
-| 3 days | 86.18% | 97.05% |
-| 7 days | 80.50% | 95.05% |
-| 14 days | 72.90% | 90.07% |
+The buffered scenario fills 12,365 more units in this simulation and carries 25,772 more average on-hand units summed across SKUs. Both policies for each SKU start with the same stock; inventory evolves through a 30-day September warm-up, and only October–November metrics are reported. The 1.645 input is a normal-theory quantile, not a guaranteed 95% unit fill rate.
+
+![Inventory policy trade-off](results/policy_tradeoff.png)
+
+Lead-time sensitivity is modeled at 3, 7, and 14 days. The safety-stock formula assumes independent daily demand (`standard deviation × sqrt(lead time)`). It is a comparison scenario, not a calibrated supplier model.
 
 ![Lead-time sensitivity](results/lead_time_sensitivity.png)
 
-## Empirical policy selection and cost trade-off
+## Reorder-point optimization
 
-For each selected SKU, the expanded model bootstraps daily demand to create an empirical lead-time-demand distribution. It tests candidate reorder points at the 50th, 75th, 90th, 95th, and 98th percentiles on an earlier August validation month. It selects the candidate with the lowest assumed relevant cost, then evaluates that fixed policy on October–November.
-
-Relevant cost is a transparent scenario measure:
+For each selected SKU, the model forms an empirical lead-time-demand distribution from overlapping historical demand windows. It tests reorder points at the 50th, 75th, 90th, 95th, and 98th percentiles. The quantity is fixed at an EOQ calculated from January–June data. Candidates are scored on August validation after a July warm-up, using:
 
 `holding cost + order cost + shortage penalty`
 
-The analysis assumes a £20 order cost, purchase cost equal to 60% of the median selling price, 25% annual holding rate, and shortage penalty equal to twice estimated purchase cost. These are planning assumptions because the public dataset contains no purchasing or inventory cost data. The selected policy is therefore a model exercise, not a recommendation to the original retailer.
+Holding cost is annualized correctly as unit holding cost × average on-hand units × measured days / 365. Assumptions are a £20 order cost, estimated purchase cost at 60% of median selling price, annual holding rate of 25%, and shortage penalty at twice estimated purchase cost per unfilled unit. Validation selects a reorder point; the chosen value is then held fixed for October–November evaluation after a September warm-up. The candidate table and selected policies are exported for review. Optimized and baseline scenarios use different initial-stock rules, so compare their measured results as separate modeled policies, not as a controlled causal lift.
 
-![Optimized policy trade-off](results/optimized_policy_tradeoff.png)
+![Selected-policy holdout comparison](results/optimized_policy_tradeoff.png)
 
-The SQL layer in [`sql/`](sql/) loads the exported demand and policy tables into SQLite and contains queries for monthly demand, service/cost ranking, and forecast-method mix. The CSV outputs can also be connected to Power BI for an operations dashboard.
+## Reproduce
 
-## Reproduce locally or in Google Colab
-
-1. Run `python download_data.py`, or download `Online Retail.xlsx` from the [UCI dataset page](https://archive.ics.uci.edu/dataset/352/online+retail) and place it at `data/Online Retail.xlsx`. The raw dataset is excluded from Git because it is large and available from the source.
+1. Use Python 3.10 or newer.
 2. Install dependencies: `python -m pip install -r requirements.txt`.
-3. Run: `python analysis.py` from the repository root. For another location use `python analysis.py --input /path/to/file.xlsx`.
-4. Open `Inventory_Project.ipynb` for the guided analysis and plots; in Colab upload `analysis.py`, `report.py`, and the `.xlsx` to the runtime, and adjust the input path in the first code cell.
-5. Run `python report.py` to refresh the charts. Inspect the tables in `results/`. The included [Excel workbook](results/inventory_recommendations.xlsx) is a snapshot of this run; import regenerated CSVs into Excel after changing the model. Python does not automatically refresh that workbook.
-6. Run `python -m unittest test_logic.py` for the seven focused checks covering cleaning, forecast leakage, inventory balance, warm-up accounting, invalid order quantities, intermittent demand, and demand-profile counting.
+3. Download the source file: `python download_data.py`.
+4. Rebuild analysis tables: `python analysis.py` (or pass `--input` and `--output`).
+5. Rebuild charts and the Excel workbook: `python report.py`.
+6. Run checks: `python -m unittest test_logic.py`.
+7. Open `Inventory_Project.ipynb` from the repository root. The notebook calls the same pipeline and reads the generated result tables and charts.
 
-No credentials or paid software are required. Python may take a minute to read the original spreadsheet.
+The raw spreadsheet is excluded from Git. The tracked `results/` files are snapshots from the documented source run; regenerate them with the commands above after changing code or assumptions. The workbook is also a snapshot and is refreshed by `report.py`.
 
-## Method and decisions
+## Output files
 
-1. Keep transactions dated Jan 1–Nov 30, 2011 with positive quantity and price, invoice numbers without cancellation prefix `C`, and SKU codes matching five digits plus up to two letters. Exclude returns/cancellations instead of silently treating negative quantities as demand. This is an approximation of merchandise sales, and some excluded codes could be legitimate products.
-2. Rank all eligible SKUs by Jan–Sep selling revenue and label ABC groups using cumulative selling revenue. This is **not** ABC by inventory value. Select the 20 highest training-revenue SKUs before seeing the test period.
-3. Aggregate transactions into daily unit sales and fill absent SKU-days with zero **recorded sales**. Such zeros do not prove there was no demand: a stockout may have suppressed sales.
-4. Evaluate previous 7-day and 28-day rolling means, the same weekday last week, and the mean of the four prior matching weekdays on Oct–Nov daily sales. Each estimate uses earlier dates only. MAE and WAPE pool the 1,220 SKU-days; WAPE divides total absolute errors by total observed units. These are rolling one-day-ahead forecasts; they are not seven-day-ahead supplier lead-time forecasts.
-5. Estimate inventory policy parameters using Jan–Aug only, then warm up inventory state during September. Keep these policy parameters fixed during measurement. Forecast benchmarking is a separate analysis; the daily forecasts do not feed the replenishment simulation.
-6. For each assumed lead time `L` in 3, 7, and 14 days, baseline reorder point is `ceil(mean daily sales × L)`. Buffered point adds `ceil(1.645 × daily standard deviation × sqrt(L))`, relying on independent daily demand and a normal approximation. The daily review approximation is another limitation.
-7. Use illustrative EOQ quantities computed from annualized Jan–Aug mean sales, a hypothetical £20/order, estimated purchase price of 60% of the median Jan–Aug selling price, and annual holding cost of 25% of that estimated purchase price. These figures are **assumptions, not retailer data**.
-8. For each SKU/lead-time pair, start both policies on September 1 with `baseline reorder point + EOQ` on hand and no pipeline orders. Receive orders at the start of the promised day, lose sales if stock is insufficient, and reorder at day end whenever inventory position reaches the point. Carry stock and pipeline orders through the warm-up; report only Oct–Nov metrics. Test-period observed sales are treated as a demand proxy; actual stockouts and lost demand cannot be measured.
-9. For advanced model selection, use May–August origins and 28-day windows for rolling backtesting. Select methods per SKU, not globally, and evaluate the selected method on Oct–Nov only after selection. For policy optimization, use August validation and keep October–November untouched until final evaluation.
+- `results/forecast_accuracy.csv`, `holdout_forecasts.csv`: fixed-method holdout metrics and predictions.
+- `results/rolling_backtest.csv`, `rolling_backtest_summary.csv`: validation predictions and pooled accuracy.
+- `results/selected_methods.csv`, `selected_holdout_forecasts.csv`, `selected_holdout_accuracy.csv`: per-SKU selection and final holdout check.
+- `results/demand_profiles.csv`: ADI, CV², and demand class per selected SKU.
+- `results/policy_scenarios.csv`, `lead_time_scenarios.csv`, `policy_summary.csv`, `lead_time_summary.csv`: baseline and buffer simulations.
+- `results/policy_optimization_validation.csv`, `optimized_policies.csv`: candidate validation costs and selected policies.
+- `results/inventory_recommendations.xlsx`: Excel workbook with the main output tables.
 
-## Recommended next improvements
+## Limitations and next steps
 
-- Investigate extreme sales spikes and evaluate weekly aggregate forecasts or intermittent-demand methods with an earlier validation period for model selection.
-- Obtain actual supplier lead times, on-hand inventory, backorders, and purchase prices before estimating business savings.
-- Estimate lead-time forecast errors and compare an empirical buffer with the normal approximation. Connect the forecast and inventory modules only after validating the appropriate horizon.
-- Add supplier calendars, order minimums, case-pack constraints, and warehouse capacity once real operational data is available.
+Sales are only a proxy for demand, and the selected high-revenue SKUs are not representative of a full assortment. The analysis excludes returns and cancellations, and zero sales may reflect stockouts. Cost, holding, shortage, and lead-time inputs are assumptions. The daily lost-sales simulation does not model supplier calendars, variable lead times, order minimums, case packs, capacity, or backorders. Before interpreting these policies operationally, replace assumptions with ERP and supplier history and validate against an additional future period.
